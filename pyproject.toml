@@ -3,6 +3,17 @@ name = "loanrisk-openenv"
 version = "1.0.0"
 description = "AI agent environment for bank loan risk assessment"
 requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.6",
+    "pydantic>=2.9.2",
+    "requests>=2.32.3",
+    "openai>=1.51.0",
+    "openenv-core>=0.2.0",
+]
+
+[project.scripts]
+server = "app:app"
 
 [tool.openenv]
 name = "loanrisk_env"
