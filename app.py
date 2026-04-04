@@ -1,8 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import List
-from environment import LoanRiskEnvironment  # Fixed: no relative import
+from typing import List, Optional
+from environment import LoanRiskEnvironment
 
 app = FastAPI()
 app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
@@ -16,7 +16,7 @@ class ActionRequest(BaseModel):
     confidence: str
 
 class ResetRequest(BaseModel):
-    task: str
+    task: Optional[str] = "easy"
 
 @app.get("/health")
 def health():
@@ -27,8 +27,13 @@ def tasks():
     return env.get_tasks()
 
 @app.post("/reset")
-def reset(req: ResetRequest):
-    return env.reset(req.task)
+async def reset(request: Request):
+    try:
+        body = await request.json()
+        task = body.get("task", "easy")
+    except Exception:
+        task = "easy"
+    return env.reset(task)
 
 @app.post("/step")
 def step(action: ActionRequest):
