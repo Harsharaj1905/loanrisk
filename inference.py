@@ -238,7 +238,7 @@ def llm_decision(llm_client, model_name: str, obs: Dict[str, Any]) -> LoanAction
 def main():
     api_base_url = os.environ.get("API_BASE_URL", "http://localhost:8000/v1")
     model_name = os.environ.get("MODEL_NAME", "gpt-4o")
-    hf_token = os.environ.get("HF_TOKEN", "default_token")
+    hf_token = os.environ.get("HF_TOKEN")
 
     llm_client = OpenAI(base_url=api_base_url, api_key=hf_token)
     env_client = LoanRiskClient("http://localhost:7860")
