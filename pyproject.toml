@@ -1,0 +1,11 @@
+[project]
+name = "loanrisk-openenv"
+version = "1.0.0"
+description = "AI agent environment for bank loan risk assessment"
+requires-python = ">=3.11"
+
+[tool.openenv]
+name = "loanrisk_env"
+version = "1.0.0"
+entry_point = "app:app"
+inference_script = "inference.py"
