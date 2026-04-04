@@ -1,295 +1,201 @@
 import os
 import json
-import sys
-from typing import Dict, Any, Optional
+import requests
 from openai import OpenAI
-from client import LoanRiskClient
-from models import LoanAction
+
+# Environment variables
+API_BASE_URL = os.environ.get("API_BASE_URL", "https://harsha1905-license1905.hf.space")
+MODEL_NAME = os.environ.get("MODEL_NAME", "llama-3.3-70b-versatile")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+
+# Groq client via OpenAI-compatible API
+client = OpenAI(
+    api_key=GROQ_API_KEY,
+    base_url="https://api.groq.com/openai/v1"
+)
+
+SYSTEM_PROMPT = """You are an expert bank loan risk assessment AI. 
+You analyze loan applications against bank policy and make decisions.
+
+Your decisions must be one of: approve, reject, escalate, request_documents
+
+Rules:
+- approve: applicant meets ALL policy requirements
+- reject: applicant fails one or more policy requirements with no exceptions
+- escalate: borderline case needing human review (co-applicant exceptions, self-employed edge cases, jumbo loans)
+- request_documents: missing critical information needed to decide
+
+Risk levels: low, medium, high
+Confidence: low, medium, high
+
+You must respond ONLY with valid JSON in this exact format:
+{
+  "decision": "approve|reject|escalate|request_documents",
+  "risk_level": "low|medium|high",
+  "failed_criteria": ["list of failed policy criteria, empty if approved"],
+  "flags": ["list of notable flags"],
+  "confidence": "low|medium|high",
+  "reasoning": "brief explanation"
+}"""
+
+def get_llm_decision(observation: dict) -> dict:
+    """Use Groq LLM to make a loan decision."""
+    profile = observation.get("applicant_profile", {})
+    policy = observation.get("bank_policy", {})
+    case_id = observation.get("case_id", "unknown")
+    
+    user_prompt = f"""Analyze this loan application and make a decision.
+
+CASE ID: {case_id}
+
+APPLICANT PROFILE:
+- Credit Score: {profile.get('credit_score', 'N/A')}
+- Annual Income: ${profile.get('income', 'N/A'):,}
+- Employment Type: {profile.get('employment_type', 'N/A')}
+- Years Employed: {profile.get('years_employed', 'N/A')}
+- Debt Ratio: {profile.get('debt_ratio', 'N/A')}
+- Loan Amount: ${profile.get('loan_amount', 'N/A'):,}
+- Property Value: ${profile.get('property_value', 'N/A'):,}
+- Purpose: {profile.get('purpose', 'N/A')}
+- Has Co-Applicant: {profile.get('has_co_applicant', False)}
+- Co-Applicant Credit Score: {profile.get('co_applicant_credit_score', 'N/A')}
+- Co-Applicant Income: {profile.get('co_applicant_income', 'N/A')}
+- Debt Recorded: {profile.get('debt_recorded', 'N/A')}
+
+BANK POLICY:
+- Minimum Credit Score: {policy.get('min_credit_score', 650)}
+- Maximum Debt Ratio: {policy.get('max_debt_ratio', 0.43)}
+- Minimum Years Employed: {policy.get('min_years_employed', 2)}
+- Maximum LTV Ratio: {policy.get('max_ltv', 0.8)}
+- Co-Applicant Exception Allowed: {policy.get('co_applicant_exception', False)}
+- Self-Employed Exception Allowed: {policy.get('self_employed_exception', False)}
+
+LTV = loan_amount / property_value = {round(profile.get('loan_amount', 0) / profile.get('property_value', 1), 3)}
+
+Analyze carefully and respond with JSON only."""
+
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.1,
+            max_tokens=500
+        )
+        
+        raw = response.choices[0].message.content.strip()
+        # Strip markdown if present
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        raw = raw.strip()
+        
+        decision = json.loads(raw)
+        return decision
+        
+    except Exception as e:
+        print(f"[LLM ERROR] {e} — using fallback")
+        return fallback_decision(profile, policy)
 
 
-def rule_based_decision(obs: Dict[str, Any]) -> Optional[LoanAction]:
-    """
-    Rule-based layer covering ~60% of cases without an API call.
-    Returns None if the case is ambiguous (falls back to LLM).
-    """
-    profile = obs.get("applicant_profile", {})
-    policy = obs.get("bank_policy", {})
-
-    credit = profile.get("credit_score")
-    income = profile.get("income")
-    debt_recorded = profile.get("debt_recorded", True)
-    has_co_applicant = profile.get("has_co_applicant", False)
-    employment_type = profile.get("employment_type", "salaried")
-    years_employed = profile.get("years_employed", 0)
-    debt_ratio = profile.get("debt_ratio")
-    loan_amount = profile.get("loan_amount", 0)
-    property_value = profile.get("property_value", 1)
-
-    min_credit = policy.get("min_credit_score", 650)
-    max_debt_ratio = policy.get("max_debt_ratio", 0.43)
-    min_years = policy.get("min_years_employed", 2)
+def fallback_decision(profile: dict, policy: dict) -> dict:
+    """Rule-based fallback if LLM fails."""
+    failed = []
+    
+    credit = profile.get("credit_score", 0)
+    debt_ratio = profile.get("debt_ratio") or 0
+    years = profile.get("years_employed", 0)
+    loan = profile.get("loan_amount", 0)
+    value = profile.get("property_value", 1)
+    ltv = loan / value if value else 1
+    has_co = profile.get("has_co_applicant", False)
     co_exception = policy.get("co_applicant_exception", False)
-    self_emp_min_years = policy.get("self_employed_exception_min_years", 2)
-    jumbo_threshold = policy.get("jumbo_loan_threshold", None)
+    
+    if credit < policy.get("min_credit_score", 650):
+        failed.append("credit_score_below_minimum")
+    if debt_ratio > policy.get("max_debt_ratio", 0.43):
+        failed.append("debt_ratio_exceeded")
+    if years < policy.get("min_years_employed", 2):
+        failed.append("insufficient_employment_history")
+    if ltv > policy.get("max_ltv", 0.8):
+        failed.append("ltv_exceeded")
 
-    failed_criteria = []
-    flags = []
-
-    # Check missing data
-    if credit is None:
-        return LoanAction(
-            decision="request_documents",
-            risk_level="medium",
-            failed_criteria=["missing_credit_score"],
-            flags=[],
-            confidence="high"
-        )
-    if income is None and not has_co_applicant:
-        return LoanAction(
-            decision="request_documents",
-            risk_level="medium",
-            failed_criteria=["missing_primary_income"],
-            flags=[],
-            confidence="high"
-        )
-    if not debt_recorded:
-        failed_criteria.append("missing_debt_data")
-
-    # Credit check
-    credit_failed = credit < min_credit
-    if credit_failed:
-        key = "primary_credit_below_650" if has_co_applicant else "credit_below_650"
-        failed_criteria.append(key)
-
-    # Employment check
-    if employment_type == "self_employed":
-        if years_employed < self_emp_min_years:
-            failed_criteria.append("insufficient_employment_history")
-            flags.append("self_employed_below_exception_threshold")
-        else:
-            flags.append("self_employed_exception")
-    else:
-        if years_employed < min_years:
-            failed_criteria.append("insufficient_employment_history")
-
-    # Debt ratio check
-    if debt_ratio is not None and debt_ratio > max_debt_ratio:
-        failed_criteria.append("debt_ratio_exceeded")
-
-    # Co-applicant check
-    if has_co_applicant:
-        co_credit = profile.get("co_applicant_credit_score")
-        if co_credit is not None and co_credit < min_credit:
-            failed_criteria.append("co_applicant_credit_below_minimum")
-        elif co_exception and credit_failed:
-            flags.append("co_applicant_exception_applied")
-
-    # Investment flag
-    if profile.get("purpose") == "investment":
-        flags.append("investment_property_flag")
-
-    # Jumbo loan flag
-    if jumbo_threshold and loan_amount > jumbo_threshold:
-        flags.append("jumbo_loan_flag")
-
-    # High LTV flag
-    if property_value > 0:
-        ltv = loan_amount / property_value
-        if ltv > 0.80:
-            flags.append("high_ltv_flagged")
-
-    # Decision logic
-    hard_fails = [c for c in failed_criteria if c != "missing_debt_data"]
-
-    if not failed_criteria and not hard_fails:
-        # Clean approval
-        risk = "low" if (debt_ratio or 0) < 0.35 else "medium"
-        return LoanAction(
-            decision="approve",
-            risk_level=risk,
-            failed_criteria=[],
-            flags=flags,
-            confidence="high"
-        )
-
-    if "missing_debt_data" in failed_criteria and len(failed_criteria) == 1:
-        return LoanAction(
-            decision="request_documents",
-            risk_level="medium",
-            failed_criteria=failed_criteria,
-            flags=flags,
-            confidence="high"
-        )
-
-    # If co-applicant exception applies and only credit is failed → escalate
-    if (
-        has_co_applicant
-        and co_exception
-        and set(hard_fails) <= {"primary_credit_below_650"}
-        and "co_applicant_credit_below_minimum" not in failed_criteria
-        and "debt_ratio_exceeded" not in failed_criteria
-        and "insufficient_employment_history" not in failed_criteria
-    ):
-        return LoanAction(
-            decision="escalate",
-            risk_level="medium",
-            failed_criteria=failed_criteria,
-            flags=flags,
-            confidence="medium"
-        )
-
-    # Multiple hard failures → reject
-    if len(hard_fails) >= 2:
-        return LoanAction(
-            decision="reject",
-            risk_level="high",
-            failed_criteria=failed_criteria,
-            flags=flags,
-            confidence="high"
-        )
-
-    # Self-employed with credit failure but qualifies for exception → escalate
-    if (
-        employment_type == "self_employed"
-        and years_employed >= self_emp_min_years
-        and set(hard_fails) <= {"credit_below_650"}
-        and "debt_ratio_exceeded" not in failed_criteria
-    ):
-        return LoanAction(
-            decision="escalate",
-            risk_level="medium",
-            failed_criteria=failed_criteria,
-            flags=flags,
-            confidence="medium"
-        )
-
-    # Self-employed below exception threshold → reject (flag already added above)
-    if (
-        employment_type == "self_employed"
-        and years_employed < self_emp_min_years
-        and set(hard_fails) <= {"insufficient_employment_history"}
-    ):
-        return LoanAction(
-            decision="reject",
-            risk_level="high",
-            failed_criteria=failed_criteria,
-            flags=flags,
-            confidence="high"
-        )
-
-    # Single debt ratio or credit failure with no exceptions → reject
-    if len(hard_fails) == 1:
-        return LoanAction(
-            decision="reject",
-            risk_level="high",
-            failed_criteria=failed_criteria,
-            flags=flags,
-            confidence="high"
-        )
-
-    # True fallback — should never reach here with current case pool
-    return LoanAction(
-        decision="escalate",
-        risk_level="medium",
-        failed_criteria=failed_criteria,
-        flags=flags,
-        confidence="low"
-    )
+    if not failed:
+        return {"decision": "approve", "risk_level": "low", "failed_criteria": [], "flags": [], "confidence": "high"}
+    
+    if has_co and co_exception and len(failed) == 1:
+        return {"decision": "escalate", "risk_level": "medium", "failed_criteria": failed, "flags": ["co_applicant_exception"], "confidence": "medium"}
+    
+    return {"decision": "reject", "risk_level": "high", "failed_criteria": failed, "flags": [], "confidence": "high"}
 
 
-def llm_decision(llm_client, model_name: str, obs: Dict[str, Any]) -> LoanAction:
-    system_prompt = (
-        "You are a senior loan risk assessor. Evaluate the loan application against bank policy.\n"
-        "Return ONLY valid JSON with NO explanation, NO markdown, NO backticks. Exact schema:\n"
-        '{"decision": "approve"|"reject"|"escalate"|"request_documents", '
-        '"risk_level": "low"|"medium"|"high", '
-        '"failed_criteria": ["string"], '
-        '"flags": ["string"], '
-        '"confidence": "high"|"medium"|"low"}\n'
-        "Use keys like: credit_below_650, debt_ratio_exceeded, insufficient_employment_history, "
-        "missing_credit_score, missing_debt_data, co_applicant_credit_below_minimum, "
-        "primary_credit_below_650, missing_primary_income.\n"
-        "Use flags like: self_employed_exception, co_applicant_exception_applied, "
-        "investment_property_flag, high_ltv_flagged, jumbo_loan_flag."
-    )
-
-    completion = llm_client.chat.completions.create(
-        model=model_name,
-        temperature=0.0,
-        max_tokens=300,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": json.dumps(obs)}
-        ]
-    )
-
-    text = completion.choices[0].message.content.strip()
-    # Strip markdown fences if present
-    if text.startswith("```"):
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-        text = text.strip()
-
-    parsed = json.loads(text)
-    return LoanAction(**parsed)
-
-
-def main():
-    api_base_url = os.environ.get("API_BASE_URL", "http://localhost:8000/v1")
-    model_name = os.environ.get("MODEL_NAME", "gpt-4o")
-    hf_token = os.environ.get("HF_TOKEN")
-
-    llm_client = OpenAI(base_url=api_base_url, api_key=hf_token)
-    env_client = LoanRiskClient("http://localhost:7860")
-
-    tasks = ["easy", "medium", "hard"]
-    episodes_per_task = 3
-    results = []
-    episode_num = 1
-
-    for task in tasks:
-        for _ in range(episodes_per_task):
-            obs = env_client.reset(task=task)
-
-            # Exact format required by validator
-            print(f"[START] episode={episode_num} task={task}", flush=True)
-
-            # Try rule-based first, fall back to LLM
-            action = rule_based_decision(obs)
-            if action is None:
-                action = llm_decision(llm_client, model_name, obs)
-
-            action_payload = action.model_dump()
-            compact_json = json.dumps(action_payload, separators=(',', ':'))
-
-            step_resp = env_client.step(action_payload)
-            reward = round(float(step_resp.get("reward", 0.0)), 1)
-            done = bool(step_resp.get("done", True))
-
-            # Exact format required by validator
-            print(f"[STEP] step=1 action={compact_json} reward={reward} done={done}", flush=True)
-            print(f"[END] episode={episode_num} total_reward={reward} task={task}", flush=True)
-
-            results.append({
-                "episode": episode_num,
-                "task": task,
-                "decision": action.decision,
-                "reward": reward
-            })
-            episode_num += 1
-
-    # Save results
-    os.makedirs("outputs/evals", exist_ok=True)
-    with open("outputs/evals/inference_results.json", "w") as f:
-        json.dump(results, f, indent=4)
-
-    # Summary table
-    print("\nSummary:", flush=True)
-    print(f"{'Ep':<5}{'Task':<10}{'Decision':<22}{'Reward'}", flush=True)
-    for r in results:
-        print(f"{r['episode']:<5}{r['task']:<10}{r['decision']:<22}{r['reward']}", flush=True)
+def run_episode(task: str = "easy"):
+    """Run a full episode against the environment."""
+    base = API_BASE_URL.rstrip("/")
+    
+    print(f"[START] task={task}")
+    
+    # Reset
+    reset_resp = requests.post(f"{base}/reset", json={"task": task})
+    obs = reset_resp.json()
+    
+    case_id = obs.get("case_id", "unknown")
+    total_reward = 0.0
+    step_num = 0
+    
+    while not obs.get("is_done", False):
+        step_num += 1
+        
+        # Get LLM decision
+        action = get_llm_decision(obs)
+        reasoning = action.pop("reasoning", "")
+        
+        print(f"[STEP] case={case_id} step={step_num} decision={action.get('decision')} "
+              f"risk={action.get('risk_level')} confidence={action.get('confidence')} "
+              f"reasoning={reasoning}")
+        
+        # Submit action
+        step_resp = requests.post(f"{base}/step", json=action)
+        result = step_resp.json()
+        
+        reward = result.get("reward", 0.0)
+        done = result.get("done", True)
+        total_reward += reward
+        
+        print(f"[STEP] reward={reward} done={done} total_reward={total_reward}")
+        
+        if done:
+            break
+            
+        # Get updated state
+        state_resp = requests.get(f"{base}/state")
+        obs = state_resp.json()
+        obs["case_id"] = case_id
+    
+    print(f"[END] case={case_id} total_reward={total_reward} steps={step_num}")
+    return total_reward
 
 
 if __name__ == "__main__":
-    main()
+    print("=== LoanRisk AI Agent - Groq LLM ===")
+    
+    tasks = ["easy", "medium", "hard"]
+    results = []
+    
+    for task in tasks:
+        print(f"\n--- Running {task} episode ---")
+        try:
+            reward = run_episode(task)
+            results.append({"task": task, "reward": reward})
+        except Exception as e:
+            print(f"[ERROR] {task} failed: {e}")
+            results.append({"task": task, "reward": 0.0})
+    
+    print("\n=== FINAL RESULTS ===")
+    for r in results:
+        print(f"  {r['task']}: {r['reward']:.2f}")
+    avg = sum(r["reward"] for r in results) / len(results)
+    print(f"  Average: {avg:.2f}")
