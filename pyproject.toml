@@ -13,10 +13,10 @@ dependencies = [
 ]
 
 [project.scripts]
-server = "app:app"
+server = "app:main"
 
 [tool.openenv]
 name = "loanrisk_env"
 version = "1.0.0"
-entry_point = "app:app"
+entry_point = "app:main"
 inference_script = "inference.py"
