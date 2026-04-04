@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LoanRisk OpenEnv Evaluator</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar: Navigation & Tasks -->
+        <aside class="sidebar">
+            <div class="logo">
+                <div class="pulse-ring"></div>
+                <h1>LoanRisk <span>Workspace</span></h1>
+            </div>
+
+            <div class="task-selection">
+                <h3>Select Assessment Task</h3>
+                <ul id="task-list">
+                    <!-- Tasks injected by JS -->
+                </ul>
+            </div>
+
+            <div class="status-panel">
+                <h3>Current State</h3>
+                <div class="metric">
+                    <span>Active Case</span>
+                    <strong id="active-case">None</strong>
+                </div>
+                <div class="metric">
+                    <span>Accumulated Reward</span>
+                    <strong id="current-reward" class="highlight">0.0</strong>
+                </div>
+                <div class="metric">
+                    <span>Task Difficulty</span>
+                    <strong id="current-difficulty">-</strong>
+                </div>
+            </div>
+            
+            <button id="reset-btn" class="glass-btn secondary mt-auto" disabled>Initialize Environment</button>
+        </aside>
+
+        <!-- Main Content Panel -->
+        <main class="content-area">
+            
+            <header class="top-nav">
+                <div class="nav-metrics">
+                    <span class="badge" id="case-status-badge">Awaiting Task Selection</span>
+                </div>
+                <div class="avatar">AI Assessor Profile</div>
+            </header>
+
+            <div class="dashboard-grid">
+                
+                <!-- Left Column: Case Details -->
+                <section class="case-details card glass">
+                    <h2>Applicant Profile</h2>
+                    <p class="subtitle" id="task-desc">Please initialize an environment to begin.</p>
+                    
+                    <div id="applicant-data" class="data-grid hidden">
+                        <!-- Populated by JS -->
+                    </div>
+                </section>
+
+                <!-- Right Column: Action Controls -->
+                <section class="action-panel card glass">
+                    <h2>Determination</h2>
+                    
+                    <form id="action-form" class="hidden">
+                        <div class="form-group">
+                            <label>Final Decision</label>
+                            <select id="action-decision" required>
+                                <option value="" disabled selected>Select Outcome...</option>
+                                <option value="approve">Approve</option>
+                                <option value="reject">Reject</option>
+                                <option value="escalate">Escalate</option>
+                                <option value="request_documents">Request Documents</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Risk Level</label>
+                            <div class="radio-group">
+                                <label><input type="radio" name="risk" value="low" required> Low</label>
+                                <label><input type="radio" name="risk" value="medium"> Medium</label>
+                                <label><input type="radio" name="risk" value="high"> High</label>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Confidence</label>
+                            <div class="radio-group">
+                                <label><input type="radio" name="confidence" value="low" required> Low</label>
+                                <label><input type="radio" name="confidence" value="medium"> Medium</label>
+                                <label><input type="radio" name="confidence" value="high"> High</label>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Failed Criteria (Comma Separated IDs)</label>
+                            <input type="text" id="action-criteria" placeholder="e.g., missing_income, credit_below_650">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Flags Raised (Comma Separated)</label>
+                            <input type="text" id="action-flags" placeholder="e.g., self_employed_exception">
+                        </div>
+
+                        <button type="submit" class="glass-btn primary lg">Submit Assessment</button>
+                    </form>
+
+                    <div id="result-overlay" class="overlay-panel hidden">
+                        <h3 id="result-title">Assessment Complete</h3>
+                        <div class="reward-circle">
+                            <span id="final-reward">+0.0</span>
+                        </div>
+                        <p id="result-message">Waiting for next episode.</p>
+                        <button id="next-case-btn" class="glass-btn secondary">Next Case</button>
+                    </div>
+
+                </section>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- Background Decoration -->
+    <div class="bg-shape shape-1"></div>
+    <div class="bg-shape shape-2"></div>
+    
+    <script src="/ui/app.js"></script>
+</body>
+</html>

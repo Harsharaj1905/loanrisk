@@ -1,0 +1,43 @@
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from typing import List
+from environment import LoanRiskEnvironment  # Fixed: no relative import
+
+app = FastAPI()
+app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
+env = LoanRiskEnvironment()
+
+class ActionRequest(BaseModel):
+    decision: str
+    risk_level: str
+    failed_criteria: List[str]
+    flags: List[str]
+    confidence: str
+
+class ResetRequest(BaseModel):
+    task: str
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "env": "loanrisk_env", "version": "1.0.0"}
+
+@app.get("/tasks")
+def tasks():
+    return env.get_tasks()
+
+@app.post("/reset")
+def reset(req: ResetRequest):
+    return env.reset(req.task)
+
+@app.post("/step")
+def step(action: ActionRequest):
+    return env.step(action.model_dump())
+
+@app.get("/state")
+def state():
+    return env.get_state()
+
+@app.get("/")
+def root():
+    return {"message": "LoanRisk Environment HTTP Server"}
