@@ -1,0 +1,25 @@
+version = 1
+requires-python = ">=3.11"
+
+[[package]]
+name = "loanrisk-openenv"
+version = "1.0.0"
+source = { virtual = "." }
+dependencies = [
+  { name = "fastapi" },
+  { name = "uvicorn" },
+  { name = "pydantic" },
+  { name = "requests" },
+  { name = "openai" },
+  { name = "openenv-core" },
+]
+
+[package.metadata]
+requires-dist = [
+  { name = "fastapi", specifier = ">=0.115.0" },
+  { name = "uvicorn", specifier = ">=0.30.6" },
+  { name = "pydantic", specifier = ">=2.9.2" },
+  { name = "requests", specifier = ">=2.32.3" },
+  { name = "openai", specifier = ">=1.51.0" },
+  { name = "openenv-core", specifier = ">=0.2.0" },
+]
