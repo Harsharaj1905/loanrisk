@@ -1,3 +1,6 @@
+import subprocess, sys
+subprocess.check_call([sys.executable, "-m", "pip", "install", "numpy"], 
+                      stdout=subprocess.DEVNULL)
 import os
 import json
 import requests
