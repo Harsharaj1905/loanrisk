@@ -20,12 +20,8 @@ API_BASE_URL = os.environ.get("API_BASE_URL", "https://harsha1905-license1905.hf
 MODEL_NAME = os.environ.get("MODEL_NAME", "llama-3.3-70b-versatile")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-# Groq client via OpenAI-compatible API
-# Use a placeholder if key not set — client init won't fail at module level
-client = OpenAI(
-    api_key=GROQ_API_KEY or "placeholder-key-not-set",
-    base_url="https://api.groq.com/openai/v1"
-)
+# Client is initialized inside get_llm_decision() to avoid startup crashes
+client = None
 
 SYSTEM_PROMPT = """You are an expert bank loan risk assessment AI.
 You analyze loan applications against bank policy and make decisions.
@@ -54,6 +50,20 @@ You must respond ONLY with valid JSON in this exact format:
 
 def get_llm_decision(observation: dict, pytorch_risk_prob: float, pytorch_risk_label: str) -> dict:
     """Use Groq LLM to make a loan decision, informed by PyTorch risk score."""
+    
+    # Initialize client here so module-level import never crashes
+    try:
+        llm_client = OpenAI(
+            api_key=GROQ_API_KEY or "no-key",
+            base_url="https://api.groq.com/openai/v1"
+        )
+    except Exception:
+        return fallback_decision(
+            observation.get("applicant_profile", {}),
+            observation.get("bank_policy", {}),
+            pytorch_risk_label
+        )
+
     profile = observation.get("applicant_profile", {})
     policy = observation.get("bank_policy", {})
     case_id = observation.get("case_id", "unknown")
@@ -99,7 +109,7 @@ Analyze carefully. If data is missing (None/N/A), flag it as a failed criterion.
 Respond with JSON only."""
 
     try:
-        response = client.chat.completions.create(
+        response = llm_client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
