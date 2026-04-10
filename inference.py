@@ -21,8 +21,9 @@ MODEL_NAME = os.environ.get("MODEL_NAME", "llama-3.3-70b-versatile")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
 # Groq client via OpenAI-compatible API
+# Use a placeholder if key not set — client init won't fail at module level
 client = OpenAI(
-    api_key=GROQ_API_KEY,
+    api_key=GROQ_API_KEY or "placeholder-key-not-set",
     base_url="https://api.groq.com/openai/v1"
 )
 
