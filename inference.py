@@ -1,6 +1,12 @@
 import subprocess, sys
-subprocess.check_call([sys.executable, "-m", "pip", "install", "numpy"], 
-                      stdout=subprocess.DEVNULL)
+
+# Auto-install missing packages in grader environment
+for pkg in ["numpy", "openai", "torch", "requests"]:
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", pkg],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
 import os
 import json
 import requests
