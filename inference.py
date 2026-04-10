@@ -15,10 +15,16 @@ from openai import OpenAI
 # PyTorch risk scorer — trained on startup
 from risk_model import get_risk_score
 
-# Environment variables
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://harsha1905-license1905.hf.space")
 MODEL_NAME = os.environ.get("MODEL_NAME", "llama-3.3-70b-versatile")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+
+# Grader injects API_KEY — fall back to GROQ_API_KEY if running locally
+GROQ_API_KEY = (
+    os.environ.get("API_KEY") or
+    os.environ.get("OPENAI_API_KEY") or
+    os.environ.get("GROQ_API_KEY") or
+    "no-key"
+)
 
 # Client is initialized inside get_llm_decision() to avoid startup crashes
 client = None
