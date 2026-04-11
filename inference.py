@@ -1,7 +1,6 @@
 import os
 import json
-from openai import OpenAI
-from client import LoanRiskClient
+import requests
 
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:7860")
 MODEL_NAME = os.environ.get("MODEL_NAME", "gpt-4o")
@@ -16,24 +15,10 @@ Analyze the loan application against bank policy and respond ONLY with valid JSO
   "flags": ["list of flags, empty if none"],
   "confidence": "low|medium|high"
 }
-
-Rules:
-- approve: applicant meets ALL policy requirements
-- reject: applicant fails requirements with no exceptions
-- escalate: borderline case needing human review
-- request_documents: missing critical information
-
-Failed criteria keys: credit_below_650, debt_ratio_exceeded, insufficient_employment_history,
-missing_credit_score, missing_debt_data, missing_primary_income, co_applicant_credit_below_minimum,
-primary_credit_below_650, ltv_exceeded
-
-Flag keys: co_applicant_exception_applied, self_employed_exception,
-self_employed_below_exception_threshold, investment_property_flag, jumbo_loan_flag, high_ltv_flagged
-
 No extra fields. No markdown. No explanation outside JSON."""
 
 
-def llm_decision(client, obs: dict) -> dict:
+def llm_decision(obs: dict) -> dict:
     profile = obs.get("applicant_profile", {})
     policy = obs.get("bank_policy", {})
 
@@ -53,7 +38,6 @@ APPLICANT:
 - Purpose: {profile.get('purpose', 'N/A')}
 - Has Co-Applicant: {profile.get('has_co_applicant', False)}
 - Co-Applicant Credit Score: {profile.get('co_applicant_credit_score', 'N/A')}
-- Co-Applicant Income: {profile.get('co_applicant_income', 'N/A')}
 - Debt Recorded: {profile.get('debt_recorded', True)}
 
 BANK POLICY:
@@ -62,23 +46,38 @@ BANK POLICY:
 - Min Years Employed: {policy.get('min_years_employed', 2)}
 - Max LTV: {policy.get('max_ltv', 0.8)}
 - Co-Applicant Exception: {policy.get('co_applicant_exception', False)}
-- Self-Employed Exception Min Years: {policy.get('self_employed_exception_min_years', 'N/A')}
-- Jumbo Loan Threshold: {policy.get('jumbo_loan_threshold', 'N/A')}
-- Investment Property Surcharge: {policy.get('investment_property_surcharge', False)}
 
 Respond with JSON only."""
 
-    response = client.chat.completions.create(
-        model=MODEL_NAME,
-        messages=[
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "model": MODEL_NAME,
+        "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt}
         ],
-        temperature=0.1,
-        max_tokens=300
-    )
+        "temperature": 0.1,
+        "max_tokens": 300
+    }
 
-    raw = response.choices[0].message.content.strip()
+    base = API_BASE_URL.rstrip("/")
+    if not base.endswith("/v1"):
+        base = base + "/v1"
+
+    response = requests.post(
+        f"{base}/chat/completions",
+        headers=headers,
+        json=payload,
+        timeout=60
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    raw = data["choices"][0]["message"]["content"].strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
@@ -95,14 +94,27 @@ Respond with JSON only."""
     }
 
 
-def main():
-    llm_client = OpenAI(
-        base_url=API_BASE_URL,
-        api_key=API_KEY
+def reset_env(task: str) -> dict:
+    response = requests.post(
+        "http://localhost:7860/reset",
+        json={"task": task},
+        timeout=30
     )
+    response.raise_for_status()
+    return response.json()
 
-    env_client = LoanRiskClient("http://localhost:7860")
 
+def step_env(action: dict) -> dict:
+    response = requests.post(
+        "http://localhost:7860/step",
+        json=action,
+        timeout=30
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def main():
     tasks = ["easy", "medium", "hard"]
     episodes_per_task = 3
     results = []
@@ -110,13 +122,13 @@ def main():
 
     for task in tasks:
         for _ in range(episodes_per_task):
-            obs = env_client.reset(task=task)
+            obs = reset_env(task)
             print(f"[START] episode={episode_num} task={task}", flush=True)
 
-            action = llm_decision(llm_client, obs)
+            action = llm_decision(obs)
             compact_json = json.dumps(action, separators=(',', ':'))
 
-            step_resp = env_client.step(action)
+            step_resp = step_env(action)
             reward = round(float(step_resp.get("reward", 0.0)), 1)
             done = bool(step_resp.get("done", True))
 
