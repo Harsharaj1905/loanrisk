@@ -1,33 +1,47 @@
 import subprocess, sys
 
-# Auto-install missing packages in grader environment
-for pkg in ["numpy", "openai", "torch", "requests"]:
-    subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", pkg],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
-    )
+def safe_install(pkg):
+    try:
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", pkg, "--quiet"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=30
+        )
+    except Exception:
+        pass
+
+for pkg in ["numpy", "openai", "requests"]:
+    safe_install(pkg)
+
 import os
 import json
 import requests
-from openai import OpenAI
 
-# PyTorch risk scorer — trained on startup
-from risk_model import get_risk_score
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+    OpenAI = None
+
+try:
+    from risk_model import get_risk_score
+    RISK_MODEL_AVAILABLE = True
+except Exception:
+    RISK_MODEL_AVAILABLE = False
+    def get_risk_score(profile, policy):
+        return 0.5, "medium"
 
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://harsha1905-license1905.hf.space")
 MODEL_NAME = os.environ.get("MODEL_NAME", "llama-3.3-70b-versatile")
 
-# Grader injects API_KEY — fall back to GROQ_API_KEY if running locally
 GROQ_API_KEY = (
     os.environ.get("API_KEY") or
     os.environ.get("OPENAI_API_KEY") or
     os.environ.get("GROQ_API_KEY") or
     "no-key"
 )
-
-# Client is initialized inside get_llm_decision() to avoid startup crashes
-client = None
 
 SYSTEM_PROMPT = """You are an expert bank loan risk assessment AI.
 You analyze loan applications against bank policy and make decisions.
@@ -55,24 +69,24 @@ You must respond ONLY with valid JSON in this exact format:
 
 
 def get_llm_decision(observation: dict, pytorch_risk_prob: float, pytorch_risk_label: str) -> dict:
-    """Use Groq LLM to make a loan decision, informed by PyTorch risk score."""
-    
-    # Initialize client here so module-level import never crashes
-    try:
-        llm_client = OpenAI(
-            api_key=GROQ_API_KEY or "no-key",
-            base_url="https://api.groq.com/openai/v1"
-        )
-    except Exception:
-        return fallback_decision(
-            observation.get("applicant_profile", {}),
-            observation.get("bank_policy", {}),
-            pytorch_risk_label
-        )
-
     profile = observation.get("applicant_profile", {})
     policy = observation.get("bank_policy", {})
     case_id = observation.get("case_id", "unknown")
+
+    # If OpenAI/Groq not available, go straight to fallback
+    if not OPENAI_AVAILABLE or not OpenAI:
+        print("[WARN] OpenAI not available — using fallback")
+        return fallback_decision(profile, policy, pytorch_risk_label)
+
+    # Try initializing the Groq client
+    try:
+        llm_client = OpenAI(
+            api_key=GROQ_API_KEY,
+            base_url="https://api.groq.com/openai/v1"
+        )
+    except Exception as e:
+        print(f"[WARN] Client init failed: {e} — using fallback")
+        return fallback_decision(profile, policy, pytorch_risk_label)
 
     income = profile.get("income")
     income_str = f"${income:,}" if isinstance(income, (int, float)) else "N/A (missing)"
@@ -126,8 +140,11 @@ Respond with JSON only."""
         )
 
         raw = response.choices[0].message.content.strip()
+
+        # Strip markdown code fences if present
         if raw.startswith("```"):
-            raw = raw.split("```")[1]
+            parts = raw.split("```")
+            raw = parts[1] if len(parts) > 1 else raw
             if raw.startswith("json"):
                 raw = raw[4:]
         raw = raw.strip()
@@ -135,6 +152,9 @@ Respond with JSON only."""
         decision = json.loads(raw)
         return decision
 
+    except json.JSONDecodeError as e:
+        print(f"[LLM ERROR] JSON parse failed: {e} — using fallback")
+        return fallback_decision(profile, policy, pytorch_risk_label)
     except Exception as e:
         print(f"[LLM ERROR] {e} — using fallback")
         return fallback_decision(profile, policy, pytorch_risk_label)
@@ -157,7 +177,7 @@ def fallback_decision(profile: dict, policy: dict, pytorch_label: str = "medium"
     if credit is None:
         failed.append("missing_credit_score")
     elif credit < policy.get("min_credit_score", 650):
-        failed.append("credit_below_650")
+        failed.append("credit_below_minimum")
 
     if debt_ratio is None:
         failed.append("missing_debt_data")
@@ -173,22 +193,45 @@ def fallback_decision(profile: dict, policy: dict, pytorch_label: str = "medium"
     if ltv > policy.get("max_ltv", 0.8):
         failed.append("ltv_exceeded")
 
+    # Missing critical docs → request documents
     missing = [f for f in failed if "missing" in f]
     if missing:
-        return {"decision": "request_documents", "risk_level": "medium",
-                "failed_criteria": failed, "flags": [], "confidence": "high"}
+        return {
+            "decision": "request_documents",
+            "risk_level": "medium",
+            "failed_criteria": failed,
+            "flags": [],
+            "confidence": "high"
+        }
 
+    # All clear → approve
     if not failed:
-        return {"decision": "approve", "risk_level": "low",
-                "failed_criteria": [], "flags": [], "confidence": "high"}
+        return {
+            "decision": "approve",
+            "risk_level": "low",
+            "failed_criteria": [],
+            "flags": [],
+            "confidence": "high"
+        }
 
+    # Co-applicant exception → escalate
     if has_co and co_exception and len(failed) == 1:
-        return {"decision": "escalate", "risk_level": "medium",
-                "failed_criteria": failed, "flags": ["co_applicant_exception_applied"],
-                "confidence": "medium"}
+        return {
+            "decision": "escalate",
+            "risk_level": "medium",
+            "failed_criteria": failed,
+            "flags": ["co_applicant_exception_applied"],
+            "confidence": "medium"
+        }
 
-    return {"decision": "reject", "risk_level": "high",
-            "failed_criteria": failed, "flags": [], "confidence": "high"}
+    # Default → reject
+    return {
+        "decision": "reject",
+        "risk_level": "high",
+        "failed_criteria": failed,
+        "flags": [],
+        "confidence": "high"
+    }
 
 
 def run_episode(task: str = "easy"):
@@ -196,50 +239,80 @@ def run_episode(task: str = "easy"):
     base = API_BASE_URL.rstrip("/")
     print(f"[START] task={task}")
 
-    reset_resp = requests.post(f"{base}/reset", json={"task": task})
-    obs = reset_resp.json()
+    try:
+        reset_resp = requests.post(
+            f"{base}/reset",
+            json={"task": task},
+            timeout=30
+        )
+        reset_resp.raise_for_status()
+        obs = reset_resp.json()
+    except Exception as e:
+        print(f"[ERROR] Reset failed: {e}")
+        return 0.0
 
     case_id = obs.get("case_id", "unknown")
     total_reward = 0.0
     step_num = 0
+    max_steps = 20  # safety limit
 
-    while not obs.get("is_done", False):
+    while not obs.get("is_done", False) and step_num < max_steps:
         step_num += 1
 
         profile = obs.get("applicant_profile", {})
         policy = obs.get("bank_policy", {})
 
         # Step 1: PyTorch pre-screen
-        pytorch_prob, pytorch_label = get_risk_score(profile, policy)
-        print(f"[STEP] case={case_id} step={step_num} "
-              f"pytorch_risk={pytorch_prob} pytorch_label={pytorch_label}")
+        try:
+            pytorch_prob, pytorch_label = get_risk_score(profile, policy)
+        except Exception as e:
+            print(f"[WARN] Risk model failed: {e}")
+            pytorch_prob, pytorch_label = 0.5, "medium"
 
-        # Step 2: LLM decision informed by PyTorch score
+        print(f"[STEP {step_num}] case={case_id} "
+              f"pytorch_risk={pytorch_prob:.3f} label={pytorch_label}")
+
+        # Step 2: LLM decision
         action = get_llm_decision(obs, pytorch_prob, pytorch_label)
-        reasoning = action.pop("reasoning", "")
+        reasoning = action.pop("reasoning", "no reasoning")
 
-        print(f"[STEP] case={case_id} step={step_num} "
-              f"decision={action.get('decision')} "
+        print(f"[STEP {step_num}] decision={action.get('decision')} "
               f"risk={action.get('risk_level')} "
               f"confidence={action.get('confidence')} "
               f"reasoning={reasoning}")
 
         # Step 3: Submit to environment
-        step_resp = requests.post(f"{base}/step", json=action)
-        result = step_resp.json()
+        try:
+            step_resp = requests.post(
+                f"{base}/step",
+                json=action,
+                timeout=30
+            )
+            step_resp.raise_for_status()
+            result = step_resp.json()
+        except Exception as e:
+            print(f"[ERROR] Step failed: {e}")
+            break
 
         reward = result.get("reward", 0.0)
         done = result.get("done", True)
         total_reward += reward
 
-        print(f"[STEP] reward={reward} done={done} total_reward={total_reward}")
+        print(f"[STEP {step_num}] reward={reward} "
+              f"total_reward={total_reward} done={done}")
 
         if done:
             break
 
-        state_resp = requests.get(f"{base}/state")
-        obs = state_resp.json()
-        obs["case_id"] = case_id
+        # Fetch next state
+        try:
+            state_resp = requests.get(f"{base}/state", timeout=30)
+            state_resp.raise_for_status()
+            obs = state_resp.json()
+            obs["case_id"] = case_id
+        except Exception as e:
+            print(f"[ERROR] State fetch failed: {e}")
+            break
 
     print(f"[END] case={case_id} total_reward={total_reward} steps={step_num}")
     return total_reward
@@ -263,5 +336,6 @@ if __name__ == "__main__":
     print("\n=== FINAL RESULTS ===")
     for r in results:
         print(f"  {r['task']}: {r['reward']:.2f}")
+
     avg = sum(r["reward"] for r in results) / len(results)
     print(f"  Average: {avg:.2f}")
