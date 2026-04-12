@@ -6,14 +6,8 @@ from typing import List, Optional
 from environment import LoanRiskEnvironment
 
 app = FastAPI()
-
-try:
-    app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
-except Exception:
-    pass
-
+app.mount("/ui", StaticFiles(directory="frontend", html=True), name="ui")
 env = LoanRiskEnvironment()
-
 
 class ActionRequest(BaseModel):
     decision: str
@@ -22,16 +16,13 @@ class ActionRequest(BaseModel):
     flags: List[str]
     confidence: str
 
-
 @app.get("/health")
 def health():
     return {"status": "ok", "env": "loanrisk_env", "version": "1.0.0"}
 
-
 @app.get("/tasks")
 def tasks():
     return env.get_tasks()
-
 
 @app.post("/reset")
 async def reset(request: Request):
@@ -40,49 +31,20 @@ async def reset(request: Request):
         task = body.get("task", "easy")
     except Exception:
         task = "easy"
-
-    state = env.reset(task)
-
-    # ✅ OpenEnv spec requires this exact wrapper
-    return JSONResponse(content={
-        "observation": state,
-        "info": {"task": task}
-    })
-
+    return JSONResponse(content=env.reset(task))
 
 @app.post("/step")
 def step(action: ActionRequest):
-    result = env.step(action.model_dump())
-
-    # ✅ OpenEnv spec requires observation in step response too
-    return JSONResponse(content={
-        "observation": env.get_state(),
-        "reward": result.get("reward", 0.0),
-        "done": result.get("done", True),
-        "info": result.get("info", {})
-    })
-
+    return env.step(action.model_dump())
 
 @app.get("/state")
 def state():
-    return JSONResponse(content={
-        "observation": env.get_state(),
-        "info": {}
-    })
-
-
-@app.get("/validate")
-def validate():
-    # ✅ Required by "openenv validate" check
-    return {
-        "env_name": "loanrisk",
-        "version": "1.0.0",
-        "actions": ["approve", "reject", "escalate", "request_documents"],
-        "observation_space": "loan_application",
-        "reward_range": [0.0, 1.0]
-    }
-
+    return env.get_state()
 
 @app.get("/")
 def root():
     return {"message": "LoanRisk Environment HTTP Server"}
+
+def main():
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=7860)
