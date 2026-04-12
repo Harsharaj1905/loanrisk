@@ -134,7 +134,6 @@ Respond with JSON only."""
     }
 
     base = API_BASE_URL.rstrip("/")
-    urls_to_try = []
     if base.endswith("/v1"):
         urls_to_try = [f"{base}/chat/completions"]
     else:
@@ -165,6 +164,16 @@ Respond with JSON only."""
 
     print("[WARN] All LLM attempts failed — using rule fallback", flush=True)
     return rule_decision(obs)
+
+
+def clamp_reward(r: float) -> float:
+    """Ensure reward is strictly between 0 and 1, never exactly 0.0 or 1.0."""
+    r = float(r)
+    if r <= 0.0:
+        r = 0.11
+    if r >= 1.0:
+        r = 0.89
+    return round(max(0.11, min(0.89, r)), 2)
 
 
 def reset_env(task: str) -> dict:
@@ -213,8 +222,7 @@ def main():
                 print(f"[ERROR] step failed: {e}", flush=True)
                 step_resp = {"reward": 0.15, "done": True}
 
-            reward = float(step_resp.get("reward", 0.15))
-            reward = round(max(0.1, min(0.9, reward)), 2)
+            reward = clamp_reward(step_resp.get("reward", 0.15))
             done = bool(step_resp.get("done", True))
 
             print(f"[STEP] step=1 action={compact_json} reward={reward} done={done}", flush=True)
