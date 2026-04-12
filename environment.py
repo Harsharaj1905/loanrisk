@@ -303,8 +303,8 @@ FALLBACK_CASE = {
 }
 
 
-def _safe_reward(r: float) -> float:
-    """Guarantee reward is strictly between 0.0 and 1.0, never equal to either."""
+def _safe_reward(r) -> float:
+    """Guarantee reward is strictly between 0.0 and 1.0 — never equal to either boundary."""
     try:
         r = float(r)
     except Exception:
@@ -336,7 +336,7 @@ class LoanRiskEnvironment:
         pool = CASE_POOLS.get(self.current_task, CASE_POOLS["easy"])
         self.current_case = random.choice(pool)
         self.is_done = False
-        self.accumulated_reward = 0.15
+        self.accumulated_reward = 0.15  # Safe non-zero baseline
         self.decisions_so_far = []
         return self.get_state()
 
@@ -345,7 +345,7 @@ class LoanRiskEnvironment:
             self.decisions_so_far.append(action)
             gold = self.current_case.get("gold", {})
 
-            # Start with baseline so we never return 0.0
+            # Start with safe baseline — never 0.0
             reward = 0.15
 
             valid_decisions = gold.get("valid_decisions", [])
