@@ -64,12 +64,12 @@ Respond with JSON only."""
         "max_tokens": 300
     }
 
+    # Use API_BASE_URL exactly as provided — do not modify it
     base = API_BASE_URL.rstrip("/")
-    if not base.endswith("/v1"):
-        base = base + "/v1"
+    url = f"{base}/chat/completions"
 
     response = requests.post(
-        f"{base}/chat/completions",
+        url,
         headers=headers,
         json=payload,
         timeout=60
