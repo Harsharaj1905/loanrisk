@@ -1,5 +1,5 @@
 import random
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 CASE_POOLS = {
     "easy": [
@@ -16,10 +16,8 @@ CASE_POOLS = {
                 "min_years_employed": 2, "max_ltv": 0.80
             },
             "gold": {
-                "valid_decisions": ["approve"],
-                "risk_level": "low",
-                "required_failed_criteria": [],
-                "required_flags": []
+                "valid_decisions": ["approve"], "risk_level": "low",
+                "required_failed_criteria": [], "required_flags": []
             }
         },
         {
@@ -35,8 +33,7 @@ CASE_POOLS = {
                 "min_years_employed": 2, "max_ltv": 0.80
             },
             "gold": {
-                "valid_decisions": ["reject"],
-                "risk_level": "high",
+                "valid_decisions": ["reject"], "risk_level": "high",
                 "required_failed_criteria": ["credit_below_650", "debt_ratio_exceeded"],
                 "required_flags": []
             }
@@ -54,10 +51,8 @@ CASE_POOLS = {
                 "min_years_employed": 2, "max_ltv": 0.80
             },
             "gold": {
-                "valid_decisions": ["request_documents"],
-                "risk_level": "medium",
-                "required_failed_criteria": ["missing_debt_data"],
-                "required_flags": []
+                "valid_decisions": ["request_documents"], "risk_level": "medium",
+                "required_failed_criteria": ["missing_debt_data"], "required_flags": []
             }
         },
         {
@@ -73,10 +68,8 @@ CASE_POOLS = {
                 "min_years_employed": 2, "max_ltv": 0.80
             },
             "gold": {
-                "valid_decisions": ["approve"],
-                "risk_level": "low",
-                "required_failed_criteria": [],
-                "required_flags": []
+                "valid_decisions": ["approve"], "risk_level": "low",
+                "required_failed_criteria": [], "required_flags": []
             }
         },
         {
@@ -92,8 +85,7 @@ CASE_POOLS = {
                 "min_years_employed": 2, "max_ltv": 0.80
             },
             "gold": {
-                "valid_decisions": ["reject"],
-                "risk_level": "high",
+                "valid_decisions": ["reject"], "risk_level": "high",
                 "required_failed_criteria": ["credit_below_650", "insufficient_employment_history"],
                 "required_flags": []
             }
@@ -111,12 +103,10 @@ CASE_POOLS = {
             },
             "bank_policy": {
                 "min_credit_score": 650, "max_debt_ratio": 0.43,
-                "min_years_employed": 2, "max_ltv": 0.80,
-                "co_applicant_exception": True
+                "min_years_employed": 2, "max_ltv": 0.80, "co_applicant_exception": True
             },
             "gold": {
-                "valid_decisions": ["approve", "escalate"],
-                "risk_level": "medium",
+                "valid_decisions": ["approve", "escalate"], "risk_level": "medium",
                 "required_failed_criteria": ["primary_credit_below_650"],
                 "required_flags": ["co_applicant_exception_applied"]
             }
@@ -135,8 +125,7 @@ CASE_POOLS = {
                 "self_employed_exception_min_years": 2
             },
             "gold": {
-                "valid_decisions": ["escalate"],
-                "risk_level": "medium",
+                "valid_decisions": ["escalate"], "risk_level": "medium",
                 "required_failed_criteria": ["credit_below_650"],
                 "required_flags": ["self_employed_exception"]
             }
@@ -154,10 +143,8 @@ CASE_POOLS = {
                 "min_years_employed": 2, "max_ltv": 0.80
             },
             "gold": {
-                "valid_decisions": ["reject"],
-                "risk_level": "high",
-                "required_failed_criteria": ["debt_ratio_exceeded"],
-                "required_flags": []
+                "valid_decisions": ["reject"], "risk_level": "high",
+                "required_failed_criteria": ["debt_ratio_exceeded"], "required_flags": []
             }
         },
         {
@@ -173,10 +160,8 @@ CASE_POOLS = {
                 "min_years_employed": 2, "max_ltv": 0.80
             },
             "gold": {
-                "valid_decisions": ["request_documents"],
-                "risk_level": "medium",
-                "required_failed_criteria": ["missing_credit_score"],
-                "required_flags": []
+                "valid_decisions": ["request_documents"], "risk_level": "medium",
+                "required_failed_criteria": ["missing_credit_score"], "required_flags": []
             }
         },
         {
@@ -192,10 +177,8 @@ CASE_POOLS = {
                 "min_years_employed": 2, "max_ltv": 0.80
             },
             "gold": {
-                "valid_decisions": ["approve"],
-                "risk_level": "medium",
-                "required_failed_criteria": [],
-                "required_flags": ["high_ltv_flagged"]
+                "valid_decisions": ["approve"], "risk_level": "medium",
+                "required_failed_criteria": [], "required_flags": ["high_ltv_flagged"]
             }
         },
     ],
@@ -217,8 +200,7 @@ CASE_POOLS = {
                 "investment_property_surcharge": True
             },
             "gold": {
-                "valid_decisions": ["escalate"],
-                "risk_level": "high",
+                "valid_decisions": ["escalate"], "risk_level": "high",
                 "required_failed_criteria": ["primary_credit_below_650", "missing_primary_income"],
                 "required_flags": ["co_applicant_exception_applied", "self_employed_exception", "investment_property_flag"]
             }
@@ -236,8 +218,7 @@ CASE_POOLS = {
                 "min_years_employed": 2, "max_ltv": 0.80
             },
             "gold": {
-                "valid_decisions": ["reject"],
-                "risk_level": "high",
+                "valid_decisions": ["reject"], "risk_level": "high",
                 "required_failed_criteria": ["credit_below_650", "missing_debt_data", "insufficient_employment_history"],
                 "required_flags": []
             }
@@ -253,12 +234,10 @@ CASE_POOLS = {
             },
             "bank_policy": {
                 "min_credit_score": 650, "max_debt_ratio": 0.43,
-                "min_years_employed": 2, "max_ltv": 0.80,
-                "co_applicant_exception": True
+                "min_years_employed": 2, "max_ltv": 0.80, "co_applicant_exception": True
             },
             "gold": {
-                "valid_decisions": ["reject"],
-                "risk_level": "high",
+                "valid_decisions": ["reject"], "risk_level": "high",
                 "required_failed_criteria": ["debt_ratio_exceeded", "co_applicant_credit_below_minimum"],
                 "required_flags": []
             }
@@ -277,8 +256,7 @@ CASE_POOLS = {
                 "self_employed_exception_min_years": 2
             },
             "gold": {
-                "valid_decisions": ["reject"],
-                "risk_level": "high",
+                "valid_decisions": ["reject"], "risk_level": "high",
                 "required_failed_criteria": ["insufficient_employment_history"],
                 "required_flags": ["self_employed_below_exception_threshold"]
             }
@@ -295,12 +273,10 @@ CASE_POOLS = {
             "bank_policy": {
                 "min_credit_score": 650, "max_debt_ratio": 0.43,
                 "min_years_employed": 2, "max_ltv": 0.80,
-                "co_applicant_exception": True,
-                "jumbo_loan_threshold": 450000
+                "co_applicant_exception": True, "jumbo_loan_threshold": 450000
             },
             "gold": {
-                "valid_decisions": ["escalate"],
-                "risk_level": "medium",
+                "valid_decisions": ["escalate"], "risk_level": "medium",
                 "required_failed_criteria": ["primary_credit_below_650"],
                 "required_flags": ["co_applicant_exception_applied", "jumbo_loan_flag"]
             }
@@ -308,75 +284,125 @@ CASE_POOLS = {
     ]
 }
 
+FALLBACK_CASE = {
+    "case_id": "fallback_001",
+    "applicant": {
+        "credit_score": 720, "income": 80000, "has_co_applicant": False,
+        "debt_recorded": True, "employment_type": "salaried",
+        "years_employed": 5, "debt_ratio": 0.30, "loan_amount": 200000,
+        "property_value": 400000, "purpose": "home_purchase"
+    },
+    "bank_policy": {
+        "min_credit_score": 650, "max_debt_ratio": 0.43,
+        "min_years_employed": 2, "max_ltv": 0.80
+    },
+    "gold": {
+        "valid_decisions": ["approve"], "risk_level": "low",
+        "required_failed_criteria": [], "required_flags": []
+    }
+}
+
+
+def _safe_reward(r: float) -> float:
+    """Guarantee reward is strictly between 0.0 and 1.0, never equal to either."""
+    try:
+        r = float(r)
+    except Exception:
+        return 0.15
+    if r <= 0.0 or r != r:  # catches 0.0 and NaN
+        return 0.15
+    if r >= 1.0:
+        return 0.85
+    return round(max(0.11, min(0.89, r)), 2)
+
 
 class LoanRiskEnvironment:
     def __init__(self):
-        self.current_task = ""
-        self.current_case = {}
-        self.accumulated_reward = 0.0
+        self.current_task = "easy"
+        self.current_case = dict(FALLBACK_CASE)
+        self.accumulated_reward = 0.15
         self.decisions_so_far = []
         self.is_done = False
 
-    def get_tasks(self) -> list[dict]:
+    def get_tasks(self) -> list:
         return [
             {"id": "easy", "description": "Single applicant, clear-cut case", "difficulty": "easy"},
             {"id": "medium", "description": "Exception clauses must be evaluated", "difficulty": "medium"},
             {"id": "hard", "description": "Missing data, co-applicants, overlapping exceptions", "difficulty": "hard"},
         ]
 
-    def reset(self, task: str) -> Dict[str, Any]:
-        self.current_task = task
-        pool = CASE_POOLS.get(task, CASE_POOLS["easy"])
+    def reset(self, task: str = "easy") -> Dict[str, Any]:
+        self.current_task = task if task in CASE_POOLS else "easy"
+        pool = CASE_POOLS.get(self.current_task, CASE_POOLS["easy"])
         self.current_case = random.choice(pool)
         self.is_done = False
-        self.accumulated_reward = 0.0
+        self.accumulated_reward = 0.15
         self.decisions_so_far = []
         return self.get_state()
 
     def step(self, action: Dict[str, Any]) -> Dict[str, Any]:
-        self.decisions_so_far.append(action)
-        gold = self.current_case["gold"]
-        reward = 0.0
+        try:
+            self.decisions_so_far.append(action)
+            gold = self.current_case.get("gold", {})
 
-        if action.get("decision") in gold["valid_decisions"]:
-            reward += 0.40
-        if action.get("risk_level") == gold.get("risk_level"):
-            reward += 0.20
+            # Start with baseline so we never return 0.0
+            reward = 0.15
 
-        agent_criteria = set(action.get("failed_criteria", []))
-        gold_criteria = set(gold.get("required_failed_criteria", []))
-        matched = agent_criteria & gold_criteria
-        reward += min(len(matched), 3) * 0.10
+            valid_decisions = gold.get("valid_decisions", [])
+            if valid_decisions and action.get("decision") in valid_decisions:
+                reward += 0.40
 
-        hallucinated = agent_criteria - gold_criteria
-        reward -= len(hallucinated) * 0.02
+            gold_risk = gold.get("risk_level", "")
+            if gold_risk and action.get("risk_level") == gold_risk:
+                reward += 0.20
 
-        agent_flags = set(action.get("flags", []))
-        gold_flags = set(gold.get("required_flags", []))
-        if gold_flags:
-            if agent_flags >= gold_flags:
-                reward += 0.10
-        else:
-            if not agent_flags:
-                reward += 0.10
+            agent_criteria = set(action.get("failed_criteria") or [])
+            gold_criteria = set(gold.get("required_failed_criteria") or [])
+            matched = agent_criteria & gold_criteria
+            reward += min(len(matched), 3) * 0.10
 
-        reward = round(max(0.1, min(0.9, reward)), 2)
+            hallucinated = agent_criteria - gold_criteria
+            reward -= len(hallucinated) * 0.02
+
+            agent_flags = set(action.get("flags") or [])
+            gold_flags = set(gold.get("required_flags") or [])
+            if gold_flags:
+                if agent_flags >= gold_flags:
+                    reward += 0.10
+            else:
+                if not agent_flags:
+                    reward += 0.10
+
+            reward = _safe_reward(reward)
+
+        except Exception:
+            reward = 0.15
+
         self.accumulated_reward = reward
         self.is_done = True
-
         return {"reward": reward, "done": True, "info": {}}
 
     def get_state(self) -> Dict[str, Any]:
-        case = self.current_case
-        return {
-            "case_id": case.get("case_id", "unknown"),
-            "stage": 1,
-            "applicant_profile": case.get("applicant", {}),
-            "bank_policy": case.get("bank_policy", {}),
-            "available_decisions": ["approve", "reject", "escalate", "request_documents"],
-            "feedback": "",
-            "partial_score": round(self.accumulated_reward, 2),
-            "flags_raised": [],
-            "task_description": f"Evaluate this {self.current_task} loan application against bank policy.",
-            "is_done": self.is_done
-        }
+        try:
+            case = self.current_case
+            return {
+                "case_id": case.get("case_id", "unknown"),
+                "stage": 1,
+                "applicant_profile": case.get("applicant", {}),
+                "bank_policy": case.get("bank_policy", {}),
+                "available_decisions": ["approve", "reject", "escalate", "request_documents"],
+                "feedback": "",
+                "partial_score": _safe_reward(self.accumulated_reward),
+                "flags_raised": [],
+                "task_description": f"Evaluate this {self.current_task} loan application against bank policy.",
+                "is_done": self.is_done
+            }
+        except Exception:
+            return {
+                "case_id": "error", "stage": 1,
+                "applicant_profile": {}, "bank_policy": {},
+                "available_decisions": ["approve", "reject", "escalate", "request_documents"],
+                "feedback": "", "partial_score": 0.15,
+                "flags_raised": [], "task_description": "Evaluate this loan application.",
+                "is_done": False
+            }
