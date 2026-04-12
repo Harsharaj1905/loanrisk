@@ -18,15 +18,67 @@ Analyze the loan application against bank policy and respond ONLY with valid JSO
 No extra fields. No markdown. No explanation outside JSON."""
 
 
+def rule_decision(obs: dict) -> dict:
+    profile = obs.get("applicant_profile", {})
+    policy = obs.get("bank_policy", {})
+    failed = []
+    flags = []
+    credit = profile.get("credit_score")
+    income = profile.get("income")
+    debt_ratio = profile.get("debt_ratio")
+    debt_recorded = profile.get("debt_recorded", True)
+    years = profile.get("years_employed", 0)
+    has_co = profile.get("has_co_applicant", False)
+    emp_type = profile.get("employment_type", "salaried")
+    co_exception = policy.get("co_applicant_exception", False)
+    min_credit = policy.get("min_credit_score", 650)
+    max_ratio = policy.get("max_debt_ratio", 0.43)
+    min_years = policy.get("min_years_employed", 2)
+    if credit is None:
+        failed.append("missing_credit_score")
+    elif credit < min_credit:
+        failed.append("primary_credit_below_650" if has_co else "credit_below_650")
+    if not debt_recorded:
+        failed.append("missing_debt_data")
+    elif debt_ratio is not None and debt_ratio > max_ratio:
+        failed.append("debt_ratio_exceeded")
+    if income is None and not has_co:
+        failed.append("missing_primary_income")
+    if emp_type == "self_employed":
+        se_min = policy.get("self_employed_exception_min_years", 2)
+        if years < se_min:
+            failed.append("insufficient_employment_history")
+            flags.append("self_employed_below_exception_threshold")
+        else:
+            flags.append("self_employed_exception")
+    elif years < min_years:
+        failed.append("insufficient_employment_history")
+    if has_co:
+        co_credit = profile.get("co_applicant_credit_score")
+        if co_credit and co_credit < min_credit:
+            failed.append("co_applicant_credit_below_minimum")
+        elif co_exception and "primary_credit_below_650" in failed:
+            flags.append("co_applicant_exception_applied")
+    missing = [f for f in failed if "missing" in f]
+    if missing:
+        return {"decision": "request_documents", "risk_level": "medium",
+                "failed_criteria": failed, "flags": flags, "confidence": "high"}
+    if not failed:
+        return {"decision": "approve", "risk_level": "low",
+                "failed_criteria": [], "flags": flags, "confidence": "high"}
+    if has_co and co_exception and set(failed) <= {"primary_credit_below_650"}:
+        return {"decision": "escalate", "risk_level": "medium",
+                "failed_criteria": failed, "flags": flags, "confidence": "medium"}
+    return {"decision": "reject", "risk_level": "high",
+            "failed_criteria": failed, "flags": flags, "confidence": "high"}
+
+
 def llm_decision(obs: dict) -> dict:
     profile = obs.get("applicant_profile", {})
     policy = obs.get("bank_policy", {})
-
     income = profile.get("income")
     income_str = f"${income:,}" if isinstance(income, (int, float)) else "N/A (missing)"
-
     user_prompt = f"""Evaluate this loan application:
-
 APPLICANT:
 - Credit Score: {profile.get('credit_score', 'N/A (missing)')}
 - Annual Income: {income_str}
@@ -39,21 +91,14 @@ APPLICANT:
 - Has Co-Applicant: {profile.get('has_co_applicant', False)}
 - Co-Applicant Credit Score: {profile.get('co_applicant_credit_score', 'N/A')}
 - Debt Recorded: {profile.get('debt_recorded', True)}
-
 BANK POLICY:
 - Min Credit Score: {policy.get('min_credit_score', 650)}
 - Max Debt Ratio: {policy.get('max_debt_ratio', 0.43)}
 - Min Years Employed: {policy.get('min_years_employed', 2)}
 - Max LTV: {policy.get('max_ltv', 0.8)}
 - Co-Applicant Exception: {policy.get('co_applicant_exception', False)}
-
 Respond with JSON only."""
-
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json"
-    }
-
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": MODEL_NAME,
         "messages": [
@@ -63,92 +108,72 @@ Respond with JSON only."""
         "temperature": 0.1,
         "max_tokens": 300
     }
-
-    # Use API_BASE_URL exactly as provided — do not modify it
     base = API_BASE_URL.rstrip("/")
-    url = f"{base}/chat/completions"
-
-    response = requests.post(
-        url,
-        headers=headers,
-        json=payload,
-        timeout=60
-    )
-    response.raise_for_status()
-    data = response.json()
-
-    raw = data["choices"][0]["message"]["content"].strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    raw = raw.strip()
-
-    parsed = json.loads(raw)
-    return {
-        "decision": parsed.get("decision", "escalate"),
-        "risk_level": parsed.get("risk_level", "medium"),
-        "failed_criteria": parsed.get("failed_criteria", []),
-        "flags": parsed.get("flags", []),
-        "confidence": parsed.get("confidence", "medium")
-    }
+    if base.endswith("/v1"):
+        urls_to_try = [f"{base}/chat/completions"]
+    else:
+        urls_to_try = [f"{base}/v1/chat/completions", f"{base}/chat/completions"]
+    for url in urls_to_try:
+        try:
+            print(f"[DEBUG] Trying: {url}", flush=True)
+            r = requests.post(url, headers=headers, json=payload, timeout=60)
+            r.raise_for_status()
+            raw = r.json()["choices"][0]["message"]["content"].strip()
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            parsed = json.loads(raw.strip())
+            return {
+                "decision": parsed.get("decision", "escalate"),
+                "risk_level": parsed.get("risk_level", "medium"),
+                "failed_criteria": parsed.get("failed_criteria", []),
+                "flags": parsed.get("flags", []),
+                "confidence": parsed.get("confidence", "medium")
+            }
+        except Exception as e:
+            print(f"[DEBUG] Failed {url}: {e}", flush=True)
+    print("[WARN] LLM failed — using rule fallback", flush=True)
+    return rule_decision(obs)
 
 
 def reset_env(task: str) -> dict:
-    response = requests.post(
-        "http://localhost:7860/reset",
-        json={"task": task},
-        timeout=30
-    )
-    response.raise_for_status()
-    return response.json()
+    r = requests.post("http://localhost:7860/reset", json={"task": task}, timeout=30)
+    r.raise_for_status()
+    return r.json()
 
 
 def step_env(action: dict) -> dict:
-    response = requests.post(
-        "http://localhost:7860/step",
-        json=action,
-        timeout=30
-    )
-    response.raise_for_status()
-    return response.json()
+    r = requests.post("http://localhost:7860/step", json=action, timeout=30)
+    r.raise_for_status()
+    return r.json()
 
 
 def main():
+    print(f"[INFO] API_BASE_URL={API_BASE_URL}", flush=True)
+    print(f"[INFO] MODEL_NAME={MODEL_NAME}", flush=True)
     tasks = ["easy", "medium", "hard"]
     episodes_per_task = 3
     results = []
     episode_num = 1
-
     for task in tasks:
         for _ in range(episodes_per_task):
             obs = reset_env(task)
             print(f"[START] episode={episode_num} task={task}", flush=True)
-
             action = llm_decision(obs)
             compact_json = json.dumps(action, separators=(',', ':'))
-
             step_resp = step_env(action)
             reward = round(float(step_resp.get("reward", 0.0)), 1)
             done = bool(step_resp.get("done", True))
-
             print(f"[STEP] step=1 action={compact_json} reward={reward} done={done}", flush=True)
             print(f"[END] episode={episode_num} total_reward={reward} task={task}", flush=True)
-
-            results.append({
-                "episode": episode_num,
-                "task": task,
-                "decision": action["decision"],
-                "reward": reward
-            })
+            results.append({"episode": episode_num, "task": task,
+                            "decision": action["decision"], "reward": reward})
             episode_num += 1
-
     os.makedirs("outputs/evals", exist_ok=True)
     with open("outputs/evals/inference_results.json", "w") as f:
         json.dump(results, f, indent=4)
-
     print("\nSummary:", flush=True)
-    print(f"{'Ep':<5}{'Task':<10}{'Decision':<22}{'Reward'}", flush=True)
     for r in results:
         print(f"{r['episode']:<5}{r['task']:<10}{r['decision']:<22}{r['reward']}", flush=True)
 
