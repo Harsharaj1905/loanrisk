@@ -367,7 +367,7 @@ class LoanRiskEnvironment:
             if not agent_flags:
                 reward += 0.10
 
-        reward = round(max(0.0, min(1.0, reward)), 2)
+        reward = round(max(0.05, min(0.95, reward)), 2)
         self.accumulated_reward = reward
         self.is_done = True
 
