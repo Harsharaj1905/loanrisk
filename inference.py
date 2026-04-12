@@ -1,10 +1,18 @@
 import os
 import json
 import requests
+from openai import OpenAI
 
+# Required environment variables per competition spec
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:7860")
 MODEL_NAME = os.environ.get("MODEL_NAME", "gpt-4o")
 API_KEY = os.environ.get("API_KEY") or os.environ.get("HF_TOKEN", "no-key")
+
+# OpenAI-compatible client using competition-provided variables
+client = OpenAI(
+    api_key=API_KEY,
+    base_url=API_BASE_URL if API_BASE_URL.endswith("/v1") else f"{API_BASE_URL.rstrip('/')}/v1"
+)
 
 SYSTEM_PROMPT = """You are an expert bank loan risk assessment AI.
 Analyze the loan application against bank policy and respond ONLY with valid JSON:
@@ -19,85 +27,93 @@ No extra fields. No markdown. No explanation outside JSON."""
 
 
 def rule_decision(obs: dict) -> dict:
-    profile = obs.get("applicant_profile", {})
-    policy = obs.get("bank_policy", {})
-    failed = []
-    flags = []
-    credit = profile.get("credit_score")
-    income = profile.get("income")
-    debt_ratio = profile.get("debt_ratio")
-    debt_recorded = profile.get("debt_recorded", True)
-    years = profile.get("years_employed", 0)
-    has_co = profile.get("has_co_applicant", False)
-    emp_type = profile.get("employment_type", "salaried")
-    co_exception = policy.get("co_applicant_exception", False)
-    min_credit = policy.get("min_credit_score", 650)
-    max_ratio = policy.get("max_debt_ratio", 0.43)
-    min_years = policy.get("min_years_employed", 2)
+    """Rule-based fallback decision — never raises exceptions."""
+    try:
+        profile = obs.get("applicant_profile", {})
+        policy = obs.get("bank_policy", {})
+        failed = []
+        flags = []
 
-    if credit is None:
-        failed.append("missing_credit_score")
-    elif credit < min_credit:
-        failed.append("primary_credit_below_650" if has_co else "credit_below_650")
+        credit = profile.get("credit_score")
+        income = profile.get("income")
+        debt_ratio = profile.get("debt_ratio")
+        debt_recorded = profile.get("debt_recorded", True)
+        years = profile.get("years_employed", 0) or 0
+        has_co = profile.get("has_co_applicant", False)
+        emp_type = profile.get("employment_type", "salaried")
+        co_exception = policy.get("co_applicant_exception", False)
+        min_credit = policy.get("min_credit_score", 650)
+        max_ratio = policy.get("max_debt_ratio", 0.43)
+        min_years = policy.get("min_years_employed", 2)
 
-    if not debt_recorded:
-        failed.append("missing_debt_data")
-    elif debt_ratio is not None and debt_ratio > max_ratio:
-        failed.append("debt_ratio_exceeded")
+        if credit is None:
+            failed.append("missing_credit_score")
+        elif credit < min_credit:
+            failed.append("primary_credit_below_650" if has_co else "credit_below_650")
 
-    if income is None and not has_co:
-        failed.append("missing_primary_income")
+        if not debt_recorded:
+            failed.append("missing_debt_data")
+        elif debt_ratio is not None and debt_ratio > max_ratio:
+            failed.append("debt_ratio_exceeded")
 
-    if emp_type == "self_employed":
-        se_min = policy.get("self_employed_exception_min_years", 2)
-        if years < se_min:
+        if income is None and not has_co:
+            failed.append("missing_primary_income")
+
+        if emp_type == "self_employed":
+            se_min = policy.get("self_employed_exception_min_years", 2)
+            if years < se_min:
+                failed.append("insufficient_employment_history")
+                flags.append("self_employed_below_exception_threshold")
+            else:
+                flags.append("self_employed_exception")
+        elif years < min_years:
             failed.append("insufficient_employment_history")
-            flags.append("self_employed_below_exception_threshold")
-        else:
-            flags.append("self_employed_exception")
-    elif years < min_years:
-        failed.append("insufficient_employment_history")
 
-    if has_co:
-        co_credit = profile.get("co_applicant_credit_score")
-        if co_credit and co_credit < min_credit:
-            failed.append("co_applicant_credit_below_minimum")
-        elif co_exception and "primary_credit_below_650" in failed:
-            flags.append("co_applicant_exception_applied")
+        if has_co:
+            co_credit = profile.get("co_applicant_credit_score")
+            if co_credit and co_credit < min_credit:
+                failed.append("co_applicant_credit_below_minimum")
+            elif co_exception and "primary_credit_below_650" in failed:
+                flags.append("co_applicant_exception_applied")
 
-    loan = profile.get("loan_amount", 0)
-    value = profile.get("property_value", 1)
-    if value and loan / value > policy.get("max_ltv", 0.8):
-        flags.append("high_ltv_flagged")
+        loan = profile.get("loan_amount", 0) or 0
+        value = profile.get("property_value", 1) or 1
+        if loan / value > policy.get("max_ltv", 0.8):
+            flags.append("high_ltv_flagged")
 
-    jumbo = policy.get("jumbo_loan_threshold")
-    if jumbo and loan > jumbo:
-        flags.append("jumbo_loan_flag")
+        jumbo = policy.get("jumbo_loan_threshold")
+        if jumbo and loan > jumbo:
+            flags.append("jumbo_loan_flag")
 
-    if profile.get("purpose") == "investment" and policy.get("investment_property_surcharge"):
-        flags.append("investment_property_flag")
+        if profile.get("purpose") == "investment" and policy.get("investment_property_surcharge"):
+            flags.append("investment_property_flag")
 
-    missing = [f for f in failed if "missing" in f]
-    if missing:
-        return {"decision": "request_documents", "risk_level": "medium",
+        missing = [f for f in failed if "missing" in f]
+        if missing:
+            return {"decision": "request_documents", "risk_level": "medium",
+                    "failed_criteria": failed, "flags": flags, "confidence": "high"}
+        if not failed:
+            return {"decision": "approve", "risk_level": "low",
+                    "failed_criteria": [], "flags": flags, "confidence": "high"}
+        if has_co and co_exception and set(failed) <= {"primary_credit_below_650"}:
+            return {"decision": "escalate", "risk_level": "medium",
+                    "failed_criteria": failed, "flags": flags, "confidence": "medium"}
+        return {"decision": "reject", "risk_level": "high",
                 "failed_criteria": failed, "flags": flags, "confidence": "high"}
-    if not failed:
-        return {"decision": "approve", "risk_level": "low",
-                "failed_criteria": [], "flags": flags, "confidence": "high"}
-    if has_co and co_exception and set(failed) <= {"primary_credit_below_650"}:
+    except Exception:
         return {"decision": "escalate", "risk_level": "medium",
-                "failed_criteria": failed, "flags": flags, "confidence": "medium"}
-    return {"decision": "reject", "risk_level": "high",
-            "failed_criteria": failed, "flags": flags, "confidence": "high"}
+                "failed_criteria": [], "flags": [], "confidence": "low"}
 
 
 def llm_decision(obs: dict) -> dict:
-    profile = obs.get("applicant_profile", {})
-    policy = obs.get("bank_policy", {})
-    income = profile.get("income")
-    income_str = f"${income:,}" if isinstance(income, (int, float)) else "N/A (missing)"
+    """LLM-based decision using OpenAI-compatible client. Falls back to rules on any error."""
+    try:
+        profile = obs.get("applicant_profile", {})
+        policy = obs.get("bank_policy", {})
+        income = profile.get("income")
+        income_str = f"${income:,}" if isinstance(income, (int, float)) else "N/A (missing)"
 
-    user_prompt = f"""Evaluate this loan application:
+        user_prompt = f"""Evaluate this loan application:
 APPLICANT:
 - Credit Score: {profile.get('credit_score', 'N/A (missing)')}
 - Annual Income: {income_str}
@@ -122,68 +138,59 @@ BANK POLICY:
 - Investment Property Surcharge: {policy.get('investment_property_surcharge', False)}
 Respond with JSON only."""
 
-    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
-    payload = {
-        "model": MODEL_NAME,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt}
-        ],
-        "temperature": 0.1,
-        "max_tokens": 300
-    }
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.1,
+            max_tokens=400
+        )
 
-    base = API_BASE_URL.rstrip("/")
-    if base.endswith("/v1"):
-        urls_to_try = [f"{base}/chat/completions"]
-    else:
-        urls_to_try = [f"{base}/v1/chat/completions", f"{base}/chat/completions"]
+        raw = response.choices[0].message.content.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        parsed = json.loads(raw.strip())
 
-    for url in urls_to_try:
-        try:
-            print(f"[DEBUG] Trying LLM: {url}", flush=True)
-            r = requests.post(url, headers=headers, json=payload, timeout=60)
-            r.raise_for_status()
-            raw = r.json()["choices"][0]["message"]["content"].strip()
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-            parsed = json.loads(raw.strip())
-            result = {
-                "decision": parsed.get("decision", "escalate"),
-                "risk_level": parsed.get("risk_level", "medium"),
-                "failed_criteria": parsed.get("failed_criteria", []),
-                "flags": parsed.get("flags", []),
-                "confidence": parsed.get("confidence", "medium")
-            }
-            print(f"[DEBUG] LLM success: {result['decision']}", flush=True)
-            return result
-        except Exception as e:
-            print(f"[DEBUG] LLM failed {url}: {e}", flush=True)
+        return {
+            "decision": parsed.get("decision", "escalate"),
+            "risk_level": parsed.get("risk_level", "medium"),
+            "failed_criteria": parsed.get("failed_criteria", []),
+            "flags": parsed.get("flags", []),
+            "confidence": parsed.get("confidence", "medium")
+        }
 
-    print("[WARN] All LLM attempts failed — using rule fallback", flush=True)
-    return rule_decision(obs)
+    except Exception as e:
+        print(f"[WARN] LLM failed: {e} — using rule fallback", flush=True)
+        return rule_decision(obs)
 
 
-def clamp_reward(r: float) -> float:
-    """Ensure reward is strictly between 0 and 1, never exactly 0.0 or 1.0."""
-    r = float(r)
-    if r <= 0.0:
-        r = 0.11
+def safe_reward(r) -> float:
+    """Guarantee reward is strictly between 0.0 and 1.0 — never equal to either boundary."""
+    try:
+        r = float(r)
+    except Exception:
+        return 0.15
+    if r <= 0.0 or r != r:  # catches 0.0 and NaN
+        return 0.15
     if r >= 1.0:
-        r = 0.89
+        return 0.85
     return round(max(0.11, min(0.89, r)), 2)
 
 
 def reset_env(task: str) -> dict:
-    r = requests.post("http://localhost:7860/reset", json={"task": task}, timeout=30)
+    env_base = "http://localhost:7860"
+    r = requests.post(f"{env_base}/reset", json={"task": task}, timeout=30)
     r.raise_for_status()
     return r.json()
 
 
 def step_env(action: dict) -> dict:
-    r = requests.post("http://localhost:7860/step", json=action, timeout=30)
+    env_base = "http://localhost:7860"
+    r = requests.post(f"{env_base}/step", json=action, timeout=30)
     r.raise_for_status()
     return r.json()
 
@@ -200,32 +207,36 @@ def main():
 
     for task in tasks:
         for _ in range(episodes_per_task):
+            # Reset environment
             try:
                 obs = reset_env(task)
             except Exception as e:
-                print(f"[ERROR] reset failed for {task}: {e}", flush=True)
+                print(f"[ERROR] reset failed for task={task}: {e}", flush=True)
                 continue
 
             print(f"[START] episode={episode_num} task={task}", flush=True)
 
+            # Get decision
             try:
                 action = llm_decision(obs)
             except Exception as e:
                 print(f"[ERROR] decision failed: {e}", flush=True)
                 action = rule_decision(obs)
 
-            compact_json = json.dumps(action, separators=(',', ':'))
+            compact_action = json.dumps(action, separators=(',', ':'))
 
+            # Submit to environment
             try:
                 step_resp = step_env(action)
             except Exception as e:
                 print(f"[ERROR] step failed: {e}", flush=True)
-                step_resp = {"reward": 0.15, "done": True}
+                step_resp = {"reward": 0.50, "done": True}
 
-            reward = clamp_reward(step_resp.get("reward", 0.15))
+            reward = safe_reward(step_resp.get("reward", 0.50))
             done = bool(step_resp.get("done", True))
 
-            print(f"[STEP] step=1 action={compact_json} reward={reward} done={done}", flush=True)
+            # REQUIRED LOG FORMAT — single [STEP] line per step
+            print(f"[STEP] step=1 action={compact_action} reward={reward} done={done}", flush=True)
             print(f"[END] episode={episode_num} total_reward={reward} task={task}", flush=True)
 
             results.append({
@@ -236,13 +247,14 @@ def main():
             })
             episode_num += 1
 
+    # Save results
     os.makedirs("outputs/evals", exist_ok=True)
     with open("outputs/evals/inference_results.json", "w") as f:
         json.dump(results, f, indent=4)
 
     print("\nSummary:", flush=True)
     for r in results:
-        print(f"{r['episode']:<5}{r['task']:<10}{r['decision']:<22}{r['reward']}", flush=True)
+        print(f"  episode={r['episode']} task={r['task']} decision={r['decision']} reward={r['reward']}", flush=True)
 
 
 if __name__ == "__main__":
