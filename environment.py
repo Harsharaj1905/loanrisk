@@ -1,7 +1,6 @@
 import random
 from typing import Dict, Any, List
 
-# Real case pools with varied gold answers — fixes the "every reward = 0.7" bug
 CASE_POOLS = {
     "easy": [
         {
@@ -339,25 +338,19 @@ class LoanRiskEnvironment:
         gold = self.current_case["gold"]
         reward = 0.0
 
-        # +0.40 correct decision
         if action.get("decision") in gold["valid_decisions"]:
             reward += 0.40
-
-        # +0.20 correct risk level
         if action.get("risk_level") == gold.get("risk_level"):
             reward += 0.20
 
-        # +0.10 per correct failed criterion (max 3 = 0.30)
         agent_criteria = set(action.get("failed_criteria", []))
         gold_criteria = set(gold.get("required_failed_criteria", []))
         matched = agent_criteria & gold_criteria
         reward += min(len(matched), 3) * 0.10
 
-        # -0.05 per hallucinated criterion
         hallucinated = agent_criteria - gold_criteria
-        reward -= len(hallucinated) * 0.05
+        reward -= len(hallucinated) * 0.02
 
-        # +0.10 flags correct
         agent_flags = set(action.get("flags", []))
         gold_flags = set(gold.get("required_flags", []))
         if gold_flags:
@@ -367,7 +360,7 @@ class LoanRiskEnvironment:
             if not agent_flags:
                 reward += 0.10
 
-        reward = round(max(0.05, min(0.95, reward)), 2)
+        reward = round(max(0.1, min(0.9, reward)), 2)
         self.accumulated_reward = reward
         self.is_done = True
 
